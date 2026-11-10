@@ -30,6 +30,7 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <glob.h>
 #include <string.h>
 #include <sys/resource.h>
 #ifdef _LIBITE_LITE
@@ -80,14 +81,23 @@ static int parse_static(char *line, int is_rcsd, int is_available)
 	/* Includes inherit the available/ parsing context from conf.c. */
 	if (MATCH_CMD(line, "include ", x)) {
 		char *file = strip_line(x);
+		glob_t gl = { 0 };
+		int rc = 0;
 
 		strlcpy(cmd, file, sizeof(cmd));
-		if (!fexist(cmd)) {
+		if (!glob(cmd, GLOB_NOSORT, NULL, &gl)) {
+			for (size_t i = 0; i < gl.gl_pathc; i++) {
+				dbg("include: loading %s", gl.gl_pathv[i]);
+				if (conf_parse_file(gl.gl_pathv[i], is_rcsd))
+					rc = 1;
+			}
+		} else if (!strchr(cmd, '*') && !strchr(cmd, '?') && !strchr(cmd, '[')) {
 			errx(1, "Cannot find include file %s, absolute path required!", x);
 			return 1;
 		}
 
-		return conf_parse_file(cmd, is_rcsd);
+		globfree(&gl);
+		return rc;
 	}
 
 	if (is_available)

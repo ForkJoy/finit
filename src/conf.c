@@ -55,6 +55,7 @@
 # include <lite/queue.h>	/* BSD sys/queue.h API */
 #endif
 #include <confuse.h>
+extern int cfg_lexer_include(cfg_t *cfg, const char *fname);
 #include <signal.h>
 #include <time.h>
 #include <glob.h>
@@ -340,6 +341,42 @@ static cfg_opt_t tty_opts[] = {
  */
 #define SVC_SEC_FLAGS (CFGF_MULTI | CFGF_TITLE | CFGF_NO_TITLE_DUPES)
 
+/*
+ * Custom include function with glob/wildcard support.
+ * Replaces the built-in cfg_include() which only accepts a single file path.
+ */
+static int conf_include(cfg_t *cfg, cfg_opt_t *opt, int argc, const char **argv)
+{
+	glob_t gl = { 0 };
+	int rc = 0;
+
+	(void)opt;
+
+	if (!cfg || !argv) {
+		errno = EINVAL;
+		return 1;
+	}
+
+	if (argc != 1) {
+		cfg_error(cfg, "wrong number of arguments to include()");
+		return 1;
+	}
+
+	if (!glob(argv[0], GLOB_NOSORT, NULL, &gl)) {
+		for (size_t i = 0; i < gl.gl_pathc; i++) {
+			dbg("include: loading %s", gl.gl_pathv[i]);
+			if (cfg_lexer_include(cfg, gl.gl_pathv[i]) != CFG_SUCCESS)
+				rc = 1;
+		}
+	} else if (!strchr(argv[0], '*') && !strchr(argv[0], '?') && !strchr(argv[0], '[')) {
+		cfg_error(cfg, "cannot find include file %s", argv[0]);
+		rc = 1;
+	}
+
+	globfree(&gl);
+	return rc;
+}
+
 static cfg_opt_t conf_opts[] = {
 	CFG_SEC     ("service", svc_opts,    SVC_SEC_FLAGS),
 	CFG_SEC     ("task",    svc_opts,    SVC_SEC_FLAGS),
@@ -371,7 +408,7 @@ static cfg_opt_t conf_opts[] = {
 	CFG_INT     ("service-interval", 0,    CFGF_NODEFAULT),
 	CFG_STR     ("shutdown",         NULL, CFGF_NODEFAULT),
 
-	CFG_FUNC    ("include", cfg_include),
+	CFG_FUNC    ("include", conf_include),
 	CFG_END()
 };
 
